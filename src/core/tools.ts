@@ -1108,4 +1108,409 @@ export function registerEVMTools(server: McpServer) {
       }
     }
   );
+
+  // EVENT MONITORING TOOLS
+
+  // Subscribe to contract events
+  server.tool(
+    "subscribe_to_events",
+    "Subscribe to real-time contract events with optional webhook notifications",
+    {
+      contractAddress: z.string().describe("The contract address to monitor"),
+      abi: z.array(z.any()).describe("The contract ABI for decoding events"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet."),
+      eventName: z.string().optional().describe("Specific event name to filter (optional)"),
+      webhookUrl: z.string().optional().describe("Webhook URL for notifications (optional)"),
+      filters: z.record(z.any()).optional().describe("Indexed parameter filters (optional)")
+    },
+    async ({ contractAddress, abi, network = DEFAULT_NETWORK, eventName, webhookUrl, filters }) => {
+      try {
+        const { subscribeToEvents } = await import('./services/events.js');
+        
+        const subscriptionId = await subscribeToEvents(
+          contractAddress as Address,
+          abi as Abi,
+          network,
+          {
+            eventName,
+            webhookUrl,
+            filters
+          }
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              subscriptionId,
+              message: `Successfully subscribed to events for contract ${contractAddress}`,
+              details: {
+                network,
+                eventName: eventName || 'all events',
+                webhookUrl: webhookUrl || 'none',
+                hasFilters: !!filters
+              }
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error subscribing to events: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Unsubscribe from events
+  server.tool(
+    "unsubscribe_from_events",
+    "Unsubscribe from a previously created event subscription",
+    {
+      subscriptionId: z.string().describe("The subscription ID to cancel")
+    },
+    async ({ subscriptionId }) => {
+      try {
+        const { unsubscribeFromEvents } = await import('./services/events.js');
+        
+        const success = await unsubscribeFromEvents(subscriptionId);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success,
+              message: success 
+                ? `Successfully unsubscribed from ${subscriptionId}` 
+                : `Subscription ${subscriptionId} not found`
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error unsubscribing: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Query historical events
+  server.tool(
+    "query_historical_events",
+    "Query historical events from a smart contract",
+    {
+      contractAddress: z.string().describe("The contract address to query"),
+      abi: z.array(z.any()).describe("The contract ABI for decoding events"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet."),
+      eventName: z.string().optional().describe("Specific event name to filter (optional)"),
+      fromBlock: z.number().optional().describe("Starting block number (optional)"),
+      toBlock: z.number().optional().describe("Ending block number (optional)"),
+      filters: z.record(z.any()).optional().describe("Indexed parameter filters (optional)")
+    },
+    async ({ contractAddress, abi, network = DEFAULT_NETWORK, eventName, fromBlock, toBlock, filters }) => {
+      try {
+        const { queryHistoricalEvents } = await import('./services/events.js');
+        
+        const events = await queryHistoricalEvents(
+          contractAddress as Address,
+          abi as Abi,
+          network,
+          {
+            eventName,
+            fromBlock: fromBlock ? BigInt(fromBlock) : undefined,
+            toBlock: toBlock ? BigInt(toBlock) : undefined,
+            filters
+          }
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              eventsFound: events.length,
+              events: events.map(e => ({
+                eventName: e.eventName,
+                args: e.args,
+                blockNumber: e.blockNumber.toString(),
+                transactionHash: e.transactionHash,
+                logIndex: e.logIndex
+              }))
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error querying events: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Get active event subscriptions
+  server.tool(
+    "get_active_event_subscriptions",
+    "Get list of all active event subscriptions",
+    {},
+    async () => {
+      try {
+        const { getActiveEventSubscriptions } = await import('./services/events.js');
+        
+        const subscriptions = getActiveEventSubscriptions();
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              activeSubscriptions: subscriptions.length,
+              subscriptions
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error getting subscriptions: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // TRANSACTION BATCHING TOOLS
+
+  // Execute batch transaction
+  server.tool(
+    "execute_batch_transaction",
+    "Execute multiple contract calls in a single transaction using Multicall3",
+    {
+      calls: z.array(z.object({
+        target: z.string().describe("Target contract address"),
+        abi: z.array(z.any()).optional().describe("Contract ABI for encoding/decoding"),
+        functionName: z.string().describe("Function name to call"),
+        args: z.array(z.any()).optional().describe("Function arguments"),
+        value: z.string().optional().describe("ETH value to send (in wei)"),
+        allowFailure: z.boolean().optional().describe("Allow this call to fail without reverting the batch")
+      })).describe("Array of contract calls to execute"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet."),
+      allowPartialSuccess: z.boolean().optional().describe("Allow some calls to fail without reverting entire batch"),
+      simulateFirst: z.boolean().optional().describe("Simulate the batch before executing")
+    },
+    async ({ calls, network = DEFAULT_NETWORK, allowPartialSuccess, simulateFirst }) => {
+      try {
+        const { executeBatchTransaction } = await import('./services/batching.js');
+        
+        // Convert string values to bigint
+        const formattedCalls = calls.map(call => ({
+          ...call,
+          target: call.target as Address,
+          value: call.value ? BigInt(call.value) : undefined
+        }));
+
+        const result = await executeBatchTransaction(
+          formattedCalls,
+          network,
+          {
+            allowPartialSuccess,
+            simulateFirst
+          }
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              transactionHash: result.transactionHash,
+              gasUsed: result.gasUsed?.toString(),
+              results: result.results,
+              message: `Successfully executed batch of ${calls.length} calls`
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error executing batch: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Simulate batch transaction
+  server.tool(
+    "simulate_batch_transaction",
+    "Simulate a batch of contract calls without executing them",
+    {
+      calls: z.array(z.object({
+        target: z.string().describe("Target contract address"),
+        abi: z.array(z.any()).optional().describe("Contract ABI for encoding/decoding"),
+        functionName: z.string().describe("Function name to call"),
+        args: z.array(z.any()).optional().describe("Function arguments"),
+        value: z.string().optional().describe("ETH value to send (in wei)")
+      })).describe("Array of contract calls to simulate"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet.")
+    },
+    async ({ calls, network = DEFAULT_NETWORK }) => {
+      try {
+        const { simulateBatchTransaction } = await import('./services/batching.js');
+        
+        // Convert string values to bigint
+        const formattedCalls = calls.map(call => ({
+          ...call,
+          target: call.target as Address,
+          value: call.value ? BigInt(call.value) : undefined
+        }));
+
+        const result = await simulateBatchTransaction(formattedCalls, network);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: result.success,
+              estimatedGas: result.estimatedGas?.toString(),
+              results: result.results,
+              error: result.error,
+              message: result.success 
+                ? `Simulation successful. All ${calls.length} calls would execute.`
+                : `Simulation failed: ${result.error}`
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error simulating batch: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Analyze gas optimization
+  server.tool(
+    "analyze_batch_gas_optimization",
+    "Analyze potential gas savings from batching multiple transactions",
+    {
+      calls: z.array(z.object({
+        target: z.string().describe("Target contract address"),
+        abi: z.array(z.any()).optional().describe("Contract ABI for encoding/decoding"),
+        functionName: z.string().describe("Function name to call"),
+        args: z.array(z.any()).optional().describe("Function arguments"),
+        value: z.string().optional().describe("ETH value to send (in wei)")
+      })).describe("Array of contract calls to analyze"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet.")
+    },
+    async ({ calls, network = DEFAULT_NETWORK }) => {
+      try {
+        const { analyzeGasOptimization } = await import('./services/batching.js');
+        
+        // Convert string values to bigint
+        const formattedCalls = calls.map(call => ({
+          ...call,
+          target: call.target as Address,
+          value: call.value ? BigInt(call.value) : undefined
+        }));
+
+        const analysis = await analyzeGasOptimization(formattedCalls, network);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              individualGasEstimates: analysis.individualGasEstimates.map(g => g.toString()),
+              totalIndividualGas: analysis.individualGasEstimates.reduce((a, b) => a + b, 0n).toString(),
+              batchGasEstimate: analysis.batchGasEstimate.toString(),
+              gasSaved: analysis.gasSaved.toString(),
+              percentageSaved: analysis.percentageSaved,
+              recommendation: analysis.recommendation
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error analyzing gas optimization: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // Create optimized batch
+  server.tool(
+    "create_optimized_batch",
+    "Create an optimized batch of operations for maximum gas efficiency",
+    {
+      operations: z.array(z.object({
+        type: z.enum(['transfer', 'approve', 'contract']).describe("Type of operation"),
+        target: z.string().describe("Target contract address"),
+        data: z.any().optional().describe("Operation-specific data"),
+        value: z.string().optional().describe("ETH value to send (in wei)")
+      })).describe("Array of operations to optimize and batch"),
+      network: z.string().optional().describe("Network name or chain ID. Defaults to Sei mainnet.")
+    },
+    async ({ operations, network = DEFAULT_NETWORK }) => {
+      try {
+        const { createOptimizedBatch } = await import('./services/batching.js');
+        
+        // Convert string values to proper types
+        const formattedOps = operations.map(op => ({
+          ...op,
+          target: op.target as Address,
+          value: op.value ? BigInt(op.value) : undefined
+        }));
+
+        const optimizedCalls = await createOptimizedBatch(formattedOps, network);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              optimizedBatch: optimizedCalls.map(call => ({
+                target: call.target,
+                functionName: call.functionName,
+                hasArgs: !!call.args,
+                hasValue: !!call.value,
+                allowFailure: call.allowFailure
+              })),
+              callCount: optimizedCalls.length,
+              message: `Created optimized batch with ${optimizedCalls.length} calls`
+            }, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error creating optimized batch: ${error instanceof Error ? error.message : String(error)}`
+          }],
+          isError: true
+        };
+      }
+    }
+  );
 }
