@@ -6,6 +6,8 @@ export * from './blocks.js';
 export * from './transactions.js';
 export * from './contracts.js';
 export * from './tokens.js';
+export * from './events.js';
+export * from './batching.js';
 export { utils as helpers } from './utils.js';
 
 // Re-export common types for convenience

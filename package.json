@@ -34,7 +34,8 @@
     "@types/bun": "latest",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
-    "conventional-changelog-cli": "^5.0.0"
+    "conventional-changelog-cli": "^5.0.0",
+    "typescript": "^5.9.2"
   },
   "peerDependencies": {
     "typescript": "^5.8.2"
