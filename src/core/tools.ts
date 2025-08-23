@@ -687,9 +687,10 @@ export function registerEVMTools(server: McpServer) {
       abi: z.array(z.any()).describe("The ABI (Application Binary Interface) of the smart contract function, as a JSON array"),
       functionName: z.string().describe("The name of the function to call on the contract (e.g., 'transfer')"),
       args: z.array(z.any()).describe("The arguments to pass to the function, as an array (e.g., ['0x1234...', '1000000000000000000'])"),
+      value: z.string().optional().describe("The amount of native token (in wei) to send with the transaction"),
       network: z.string().optional().describe("Network name (e.g., 'sei', 'sei-testnet', 'sei-devnet') or chain ID. Defaults to Sei mainnet.")
     },
-    async ({ contractAddress, abi, functionName, args, network = DEFAULT_NETWORK }) => {
+    async ({ contractAddress, abi, functionName, args, value, network = DEFAULT_NETWORK }) => {
       try {
         // Parse ABI if it's a string
         const parsedAbi = typeof abi === 'string' ? JSON.parse(abi) : abi;
@@ -700,6 +701,10 @@ export function registerEVMTools(server: McpServer) {
           functionName,
           args
         };
+
+        if (value) {
+        contractParams.value = BigInt(value); // ensure it's bigint
+      }
 
         const txHash = await services.writeContract(
           contractParams,
